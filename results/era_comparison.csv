@@ -1,0 +1,7 @@
+project_id,n_pre,n_ai,phs_pre_mean,phs_pre_median,phs_ai_mean,phs_ai_median,phs_shift,mwu_U,mwu_p,cliffs_delta,significant_05
+django,8,9,68.83,66.25,72.15,72.5,3.32,43.5,0.4966,0.208,False
+kubernetes,8,9,41.73,35.0,29.63,35.0,-12.11,15.0,0.0209,-0.583,True
+numpy,8,9,79.4,82.66,78.9,72.5,-0.5,30.0,0.5834,-0.167,False
+react,8,9,77.57,81.04,64.18,72.5,-13.4,22.0,0.1898,-0.389,False
+rust,8,9,55.62,60.0,75.2,85.14,19.57,65.5,0.0043,0.819,True
+vscode,8,9,57.5,60.0,81.8,86.24,24.3,72.0,0.0005,1.0,True

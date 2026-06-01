@@ -1,0 +1,22 @@
+{
+  "n_observations": 144,
+  "phs_mean": 65.33,
+  "phs_std": 20.04,
+  "phs_variance": 401.77,
+  "phs_iqr": 36.08,
+  "phs_min": 10.59,
+  "phs_max": 88.33,
+  "state_distribution": {
+    "Elite AI Maturity": 50,
+    "Sustainable": 46,
+    "High Performance": 24,
+    "At Risk": 21,
+    "Critical Risk": 3
+  },
+  "entropy_bits": 2.008,
+  "entropy_normalised": 0.865,
+  "kruskal_H": 68.11,
+  "kruskal_p": 0.0,
+  "kruskal_significant_05": true,
+  "no_rule_fallback_pct": 13.89
+}
