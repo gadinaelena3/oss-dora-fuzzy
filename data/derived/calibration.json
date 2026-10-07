@@ -1,0 +1,19 @@
+{
+  "k_dspd": 12.18,
+  "k_ltbf": 7.22,
+  "k_qd": 4.35,
+  "anchors": {
+    "dspd": 12.0,
+    "ltbf": 7.0,
+    "qd": 3.0
+  },
+  "bots_included": false,
+  "pre_ai_mean_prs": {
+    "django": 247.5,
+    "kubernetes": 1425.5,
+    "numpy": 303.38,
+    "react": 244.0,
+    "rust": 1371.88,
+    "vscode": 366.5
+  }
+}

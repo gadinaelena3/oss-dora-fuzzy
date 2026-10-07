@@ -1,0 +1,12 @@
+{
+  "kruskal_H": 72.14,
+  "kruskal_p": 3.681037750446782e-14,
+  "fallback_pct": 30.56,
+  "states": {
+    "Sustainable": 90,
+    "At Risk": 22,
+    "High Performance": 20,
+    "Critical Risk": 6,
+    "Elite AI Maturity": 6
+  }
+}

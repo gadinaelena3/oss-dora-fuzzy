@@ -1,26 +1,10 @@
-# Python
 __pycache__/
 *.py[cod]
-*.egg-info/
 .venv/
 venv/
-.python-version
-.pytest_cache/
-
-# Live-fetched raw data should not be committed (large, slow, regenerable).
-#data/raw/
-
-# Derived metrics should not be committed (regenerable from raw or sample).
-#data/derived/
-
-# Generated outputs are regenerable; commit only intentionally.
-# Comment the next two lines if you want to commit results for archival.
-# results/*.csv
-# results/*.json
-
-# OS / editor
 .DS_Store
 .idea/
 .vscode/
-*.swp
 .env
+.github_token
+data/raw/parts/

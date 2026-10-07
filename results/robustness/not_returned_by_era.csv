@@ -1,0 +1,7 @@
+project_id,ai,pre,transition
+django,2,0,0
+kubernetes,1,0,0
+numpy,83,0,1
+react,0,0,1
+rust,5,16,69
+vscode,0,11,10

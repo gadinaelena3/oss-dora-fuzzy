@@ -2,7 +2,7 @@
 # Each project lists owner/repo plus public-knowledge metadata that informs
 # the analysis (primary language, governance model, expected AI-era stance).
 #
-# To add or remove a project, edit this file and re-run `python src/run.py`.
+# The collection script (src/fetch_github.py) carries its own repository list.
 
 projects:
   - id: vscode
@@ -17,7 +17,7 @@ projects:
     repo: react
     primary_language: JavaScript
     governance: corporate-OSS
-    notes: "Meta-led, mature framework, slow innovation cadence"
+    notes: "Meta-led, mature framework; repository since transferred to react/react and collected under that name"
 
   - id: kubernetes
     owner: kubernetes

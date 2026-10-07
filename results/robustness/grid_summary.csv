@@ -1,0 +1,7 @@
+project,delta_reported,delta_min,delta_max,n_positive,n_negative,n_significant,n_settings
+django,-0.056,-0.847,0.639,24,34,1,60
+kubernetes,-0.208,-0.431,0.25,12,48,0,60
+numpy,-0.139,-0.444,0.792,41,19,2,60
+react,-0.556,-0.778,0.278,9,49,2,60
+rust,-0.458,-0.875,1.0,23,31,16,60
+vscode,1.0,0.833,1.0,60,0,60,60

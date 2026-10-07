@@ -1,0 +1,7 @@
+repository,merged_prs_repository,merged_prs_search,not_returned,share_pct
+microsoft/vscode,54962,54911,51,0.09
+react/react,13105,13090,15,0.11
+kubernetes/kubernetes,66254,66079,175,0.26
+django/django,10797,10786,11,0.10
+numpy/numpy,15100,14976,124,0.82
+rust-lang/rust,74977,74589,388,0.52

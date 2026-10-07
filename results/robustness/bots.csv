@@ -1,0 +1,3 @@
+variant,k_dspd,k_ltbf,k_qd,kruskal_H,kruskal_p,fallback_pct,django_delta,django_p,kubernetes_delta,kubernetes_p,numpy_delta,numpy_p,react_delta,react_p,rust_delta,rust_p,vscode_delta,vscode_p
+bots excluded,12.18,7.22,4.35,78.23,1.9687961773226446e-15,29.17,-0.056,0.8817,-0.208,0.4508,-0.139,0.6278,-0.556,0.0536,-0.458,0.0907,1.0,0.0002
+bots included,12.21,7.16,4.37,76.41,4.727004713850729e-15,29.86,0.028,0.9604,-0.208,0.4508,0.014,1.0,-0.569,0.0484,-0.458,0.0907,1.0,0.0002

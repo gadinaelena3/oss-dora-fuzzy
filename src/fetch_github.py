@@ -1,249 +1,211 @@
-"""
-GitHub fetcher for the OSS longitudinal study.
-==============================================
-
-Fetches the raw signals needed by `compute_metrics.py` and writes them to
-`data/raw/{project_id}.jsonl`. Reviewers run this with their own GitHub
-token to verify the bundled sample against live data.
-
-What gets fetched per project:
-  - All merged pull requests with timestamps, additions, deletions, commits.
-  - All releases (tags) within the study window.
-
-Rate limiting: PRs are fetched via the Search API (30 req/min) with one
-query per quarter, so GitHub does the date filtering server-side. PR detail
-calls (additions/deletions) use the core API (5 000 req/hr). Both limits
-are handled automatically.
-
-Usage:
-    export GITHUB_TOKEN=ghp_xxx        # personal access token, public repo scope
-    python src/fetch_github.py         # fetch all projects in config/projects.yaml
-    python src/fetch_github.py vscode  # fetch one project
-"""
-from __future__ import annotations
-
 import json
 import os
 import sys
-import threading
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import date, datetime, timedelta, timezone
+import urllib.error
+import urllib.request
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-import requests
-import yaml
+API = "https://api.github.com/graphql"
+OUT = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("data/raw")
+PARTS = OUT / "parts"
+PROJECTS = {
+    "vscode": "microsoft/vscode",
+    "react": "react/react",
+    "kubernetes": "kubernetes/kubernetes",
+    "django": "django/django",
+    "numpy": "numpy/numpy",
+    "rust": "rust-lang/rust",
+}
+YEARS = range(2019, 2025)
+CEILING = 1000
+BUDGET = float(os.environ.get("MAX_SECONDS", "0"))
+WORKERS = int(os.environ.get("WORKERS", "6"))
+PAGE = 50
+T0 = time.time()
+QUERY = """
+query($q: String!, $n: Int!, $cursor: String) {
+  search(query: $q, type: ISSUE, first: $n, after: $cursor) {
+    issueCount
+    pageInfo { hasNextPage endCursor }
+    nodes {
+      ... on PullRequest {
+        number
+        createdAt
+        mergedAt
+        additions
+        deletions
+        changedFiles
+        baseRefName
+        isCrossRepository
+        author { __typename login }
+        mergedBy { __typename login }
+        commits { totalCount }
+        reviews { totalCount }
+        comments { totalCount }
+        labels(first: 30) { nodes { name } }
+      }
+    }
+  }
+  rateLimit { remaining resetAt }
+}
+"""
 
-ROOT = Path(__file__).resolve().parents[1]
-RAW_DIR = ROOT / "data" / "raw"
-CONFIG = ROOT / "config" / "projects.yaml"
 
-GITHUB_API  = "https://api.github.com"
-SEARCH_API  = f"{GITHUB_API}/search/issues"
-PER_PAGE    = 100
-MAX_SEARCH_PAGES   = 10   # Search API hard cap: 1,000 results per query
-MAX_PAGES_RELEASES = 10
-DETAIL_WORKERS     = 5    # parallel threads for PR detail fetches
-
-_rate_lock = threading.Lock()  # ensures only one thread sleeps/checks at a time
+def token():
+    t = os.environ.get("GITHUB_TOKEN")
+    if not t and Path(".github_token").exists():
+        t = Path(".github_token").read_text().strip()
+    if not t:
+        sys.exit("Set GITHUB_TOKEN or put the token in a file named .github_token")
+    return t
 
 
-def _headers() -> dict:
-    """Build auth headers. Token is required to avoid 60-req/hour limit."""
-    token = os.environ.get("GITHUB_TOKEN")
-    if not token:
-        sys.exit(
-            "ERROR: GITHUB_TOKEN env var is required.\n"
-            "Create a token at https://github.com/settings/tokens (no scopes "
-            "needed for public repos) and export it before running."
-        )
+def post(variables, tok, attempt=0):
+    body = json.dumps({"query": QUERY, "variables": variables}).encode()
+    req = urllib.request.Request(API, data=body, headers={
+        "Authorization": f"bearer {tok}",
+        "Content-Type": "application/json",
+        "User-Agent": "oss-dora-fuzzy-fetch",
+    })
+    try:
+        with urllib.request.urlopen(req, timeout=90) as r:
+            data = json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        if e.code == 401:
+            sys.exit("GitHub rejected the token (401)")
+        if attempt >= 10:
+            raise
+        if e.code in (502, 504):
+            time.sleep(2)
+            return post(dict(variables, n=max(variables["n"] // 2, 10)), tok, attempt + 1)
+        wait = int(e.headers.get("Retry-After") or min(60 * (attempt + 1), 600))
+        print(f"    HTTP {e.code}, waiting {wait}s", flush=True)
+        time.sleep(wait)
+        return post(variables, tok, attempt + 1)
+    except (urllib.error.URLError, TimeoutError, ConnectionError):
+        if attempt >= 8:
+            raise
+        time.sleep(min(15 * (attempt + 1), 120))
+        return post(variables, tok, attempt + 1)
+    if data.get("errors"):
+        if attempt >= 8:
+            sys.exit(json.dumps(data["errors"])[:500])
+        variables = dict(variables, n=max(variables["n"] // 2, 10))
+        time.sleep(min(5 * (attempt + 1), 60))
+        return post(variables, tok, attempt + 1)
+    rl = data["data"]["rateLimit"]
+    if rl["remaining"] < 50:
+        reset = datetime.fromisoformat(rl["resetAt"].replace("Z", "+00:00"))
+        wait = max((reset - datetime.now(timezone.utc)).total_seconds(), 0) + 10
+        print(f"    rate limit reached, waiting {int(wait)}s", flush=True)
+        time.sleep(wait)
+    return data["data"]["search"]
+
+
+def iso(dt):
+    return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def window(repo, start, end, tok, audit):
+    q = f"repo:{repo} is:pr is:merged merged:{iso(start)}..{iso(end)}"
+    first = post({"q": q, "n": PAGE, "cursor": None}, tok)
+    total = first["issueCount"]
+    if total > CEILING:
+        if end - start <= timedelta(seconds=1):
+            sys.exit(f"window cannot be split further: {q}")
+        mid = (start + (end - start) / 2).replace(microsecond=0)
+        return (window(repo, start, mid, tok, audit)
+                + window(repo, mid + timedelta(seconds=1), end, tok, audit))
+    nodes, page = list(first["nodes"]), first
+    while page["pageInfo"]["hasNextPage"]:
+        page = post({"q": q, "n": PAGE, "cursor": page["pageInfo"]["endCursor"]}, tok)
+        nodes += page["nodes"]
+    nodes = [n for n in nodes if n and n.get("number") is not None]
+    audit.append({"start": iso(start), "end": iso(end), "reported": total, "retrieved": len(nodes)})
+    return nodes
+
+
+def record(n):
+    author = n.get("author") or {}
+    merger = n.get("mergedBy") or {}
     return {
-        "Authorization": f"Bearer {token}",
-        "Accept": "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28",
+        "type": "pr",
+        "number": n["number"],
+        "created_at": n["createdAt"],
+        "merged_at": n["mergedAt"],
+        "additions": n["additions"],
+        "deletions": n["deletions"],
+        "changed_files": n["changedFiles"],
+        "commits": n["commits"]["totalCount"],
+        "reviews": n["reviews"]["totalCount"],
+        "comments": n["comments"]["totalCount"],
+        "author": author.get("login"),
+        "author_type": author.get("__typename"),
+        "merged_by": merger.get("login"),
+        "merged_by_type": merger.get("__typename"),
+        "base": n["baseRefName"],
+        "from_fork": n["isCrossRepository"],
+        "labels": [l["name"] for l in n["labels"]["nodes"]],
     }
 
 
-def _get(url: str, params: dict | None = None) -> requests.Response:
-    """GET with thread-safe rate-limit awareness.
-    Threshold is 10% of the limit so it works for both the core API (5 000/hr)
-    and the search API (30/min). The lock prevents multiple threads from all
-    deciding simultaneously that remaining is fine and bursting past the limit."""
-    r = requests.get(url, headers=_headers(), params=params, timeout=30)
-    with _rate_lock:
-        limit     = int(r.headers.get("X-RateLimit-Limit",     "5000"))
-        remaining = int(r.headers.get("X-RateLimit-Remaining", "1000"))
-        if remaining < max(10, limit // 10):
-            reset = int(r.headers.get("X-RateLimit-Reset", str(int(time.time()) + 60)))
-            delay = max(2, reset - int(time.time()))
-            print(f"  [rate-limit] {remaining}/{limit} remaining, sleeping {delay}s", flush=True)
-            time.sleep(delay)
-    if r.status_code != 200:
-        raise RuntimeError(f"GitHub API {r.status_code}: {r.text[:200]}")
-    return r
+def months():
+    for y in YEARS:
+        for m in range(1, 13):
+            start = datetime(y, m, 1, tzinfo=timezone.utc)
+            nxt = datetime(y + (m == 12), m % 12 + 1, 1, tzinfo=timezone.utc)
+            yield f"{y}-{m:02d}", start, nxt - timedelta(seconds=1)
 
 
-def _fetch_detail(pr_url: str) -> dict:
-    """Fetch additions/deletions/commits for a single PR (used by thread pool)."""
-    detail = _get(pr_url).json()
-    return {
-        "number":          detail["number"],
-        "created_at":      detail["created_at"],
-        "merged_at":       detail["merged_at"],
-        "additions":       detail.get("additions", 0),
-        "deletions":       detail.get("deletions", 0),
-        "commits":         detail.get("commits", 0),
-        "review_comments": detail.get("review_comments", 0),
-    }
+def fetch_month(pid, repo, label, start, end, tok):
+    part = PARTS / f"{pid}_{label}.json"
+    if part.exists() or (BUDGET and time.time() - T0 > BUDGET):
+        return
+    audit = []
+    nodes = window(repo, start, end, tok, audit)
+    seen, rows = set(), []
+    for n in nodes:
+        if n["number"] not in seen:
+            seen.add(n["number"])
+            rows.append(record(n))
+    reported = sum(a["reported"] for a in audit)
+    tmp = part.with_suffix(f".{os.getpid()}.tmp")
+    tmp.write_text(json.dumps({"project": pid, "month": label, "reported": reported,
+                               "retrieved": len(rows), "windows": audit, "prs": rows}))
+    tmp.rename(part)
+    flag = "" if reported == len(rows) else "  <-- mismatch"
+    print(f"{pid} {label}: {len(rows)} of {reported}{flag}", flush=True)
 
 
-def _quarter_windows(since: str, until: str):
-    """Yield (start_str, end_str) for each calendar quarter that overlaps [since, until]."""
-    start = date.fromisoformat(since)
-    end   = date.fromisoformat(until)
-    y, m  = start.year, ((start.month - 1) // 3) * 3 + 1
-    while True:
-        q_start = date(y, m, 1)
-        next_m  = m + 3
-        q_end   = date(y + next_m // 12, next_m % 12 or 12, 1) - timedelta(days=1)
-        window_start = max(q_start, start)
-        window_end   = min(q_end,   end)
-        if window_start > end:
-            break
-        yield window_start.isoformat(), window_end.isoformat()
-        m += 3
-        if m > 12:
-            m, y = m - 12, y + 1
-
-
-def fetch_pulls(owner: str, repo: str, since: str, until: str, out_file) -> int:
-    """Fetch merged PRs in [since, until] via the Search API (one query per quarter).
-
-    Phase 1 (sequential): one Search API call per quarter to collect PR URLs.
-    Phase 2 (parallel):   DETAIL_WORKERS threads fetch additions/deletions concurrently.
-                          Each completed PR is written and flushed to out_file immediately
-                          so progress is not lost on crash.
-
-    Returns the number of PRs written.
-    """
-    quarters = list(_quarter_windows(since, until))
-    write_lock = threading.Lock()
-
-    # --- Phase 1: collect all PR detail URLs via Search API (sequential) --------
-    pr_urls: list[tuple[int, str]] = []  # (pr_number, detail_url)
-    for q_idx, (q_start, q_end) in enumerate(quarters, 1):
-        print(f"  [{q_idx}/{len(quarters)}] {q_start}..{q_end} — searching...", flush=True)
-        query = f"repo:{owner}/{repo} type:pr is:merged merged:{q_start}..{q_end}"
-        page  = 1
-        while page <= MAX_SEARCH_PAGES:
-            r     = _get(SEARCH_API, params={"q": query, "per_page": PER_PAGE, "page": page})
-            data  = r.json()
-            total = data.get("total_count", 0)
-            if page == 1:
-                print(f"         {total} PRs found"
-                      + (" — GitHub caps at 1 000, first 1 000 will be used" if total > 1000 else ""),
-                      flush=True)
-            items = data.get("items", [])
-            for item in items:
-                pr_urls.append((item["number"], item["pull_request"]["url"]))
-            if len(items) < PER_PAGE:
-                break
-            page += 1
-
-    # --- Phase 2: fetch PR details in parallel, write each one immediately ------
-    total_prs = len(pr_urls)
-    print(f"  fetching details for {total_prs} PRs ({DETAIL_WORKERS} threads)...", flush=True)
-    done = 0
-    with ThreadPoolExecutor(max_workers=DETAIL_WORKERS) as pool:
-        futures = {pool.submit(_fetch_detail, url): num for num, url in pr_urls}
-        for future in as_completed(futures):
-            pr    = future.result()
-            pr_num = futures[future]
-            with write_lock:
-                out_file.write(json.dumps({"type": "pr", **pr}) + "\n")
-                out_file.flush()
-            done += 1
-            print(f"  {done}/{total_prs} details fetched (last: PR #{pr_num})   ",
-                  end="\r", flush=True)
-    print(f"  {total_prs} PRs fetched.{' ' * 40}", flush=True)
-    return total_prs
-
-
-def fetch_releases(owner: str, repo: str, since: str, until: str) -> list[dict]:
-    """Fetch releases whose published date falls in [since, until]."""
-    out: list[dict] = []
-    since_dt = datetime.fromisoformat(since).replace(tzinfo=timezone.utc)
-    until_dt = datetime.fromisoformat(until).replace(tzinfo=timezone.utc)
-    url = f"{GITHUB_API}/repos/{owner}/{repo}/releases"
-    page = 1
-    while page <= MAX_PAGES_RELEASES:
-        r = _get(url, params={"per_page": PER_PAGE, "page": page})
-        batch = r.json()
-        if not batch:
-            break
-        for rel in batch:
-            pub = rel.get("published_at")
-            if not pub:
-                continue
-            pub_dt = datetime.fromisoformat(pub.replace("Z", "+00:00"))
-            if since_dt <= pub_dt <= until_dt:
-                out.append({
-                    "tag_name":     rel["tag_name"],
-                    "published_at": pub,
-                    "prerelease":   rel.get("prerelease", False),
-                })
-        page += 1
-    return out
-
-
-def fetch_project(project: dict, since: str, until: str) -> None:
-    """Fetch one project and write a single jsonl file."""
-    pid    = project["id"]
-    owner  = project["owner"]
-    repo   = project["repo"]
-    out_path = RAW_DIR / f"{pid}.jsonl"
-    RAW_DIR.mkdir(parents=True, exist_ok=True)
-
-    print(f"\n=== {pid} ({owner}/{repo}) ===")
-
-    # Open the file immediately so each PR is persisted as it arrives.
-    # A crash mid-fetch loses only the in-flight batch, not all prior work.
-    with open(out_path, "w") as f:
-        f.write(json.dumps({"_meta": {"project_id": pid, "owner": owner, "repo": repo,
-                                       "fetched_at": datetime.now(timezone.utc).isoformat()}}) + "\n")
-        f.flush()
-
-        print(f"  fetching merged PRs...")
-        n_prs = fetch_pulls(owner, repo, since, until, out_file=f)
-        print(f"  {n_prs} PRs in window")
-
-        print(f"  fetching releases...")
-        rels = fetch_releases(owner, repo, since, until)
-        for rel in rels:
-            f.write(json.dumps({"type": "release", **rel}) + "\n")
-        print(f"  {len(rels)} releases in window")
-
-    print(f"  wrote {out_path}")
-
-
-def main() -> int:
-    with open(CONFIG) as f:
-        cfg = yaml.safe_load(f)
-
-    since = cfg["study_window"]["start"]
-    until = cfg["study_window"]["end"]
-
-    only = sys.argv[1] if len(sys.argv) > 1 else None
-
-    for project in cfg["projects"]:
-        if only and project["id"] != only:
-            continue
-        try:
-            fetch_project(project, since, until)
-        except Exception as e:
-            print(f"  ERROR for {project['id']}: {e}")
-    return 0
+def main():
+    tok = token()
+    PARTS.mkdir(parents=True, exist_ok=True)
+    tasks = [(pid, repo, label, start, end) for label, start, end in months() for pid, repo in PROJECTS.items()]
+    with ThreadPoolExecutor(max_workers=WORKERS) as pool:
+        list(pool.map(lambda t: fetch_month(*t, tok), tasks))
+    done = len(list(PARTS.glob("*.json")))
+    if done < len(tasks):
+        print(f"paused: {done} of {len(tasks)} project-months done; run again to continue")
+        return
+    summary = []
+    for pid, repo in PROJECTS.items():
+        seen = set()
+        with open(OUT / f"{pid}.jsonl", "w") as f:
+            f.write(json.dumps({"_meta": {"project_id": pid, "repo": repo, "source": "graphql-search",
+                                          "fetched_at": iso(datetime.now(timezone.utc))}}) + "\n")
+            for label, _, _ in months():
+                p = json.loads((PARTS / f"{pid}_{label}.json").read_text())
+                summary.append(f"{pid},{label},{p['reported']},{p['retrieved']},{len(p['windows'])}")
+                for row in p["prs"]:
+                    if row["number"] not in seen:
+                        seen.add(row["number"])
+                        f.write(json.dumps(row) + "\n")
+    (OUT / "completeness.csv").write_text("project,month,reported,retrieved,windows\n" + "\n".join(summary) + "\n")
+    print(f"done: {OUT}")
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    main()
