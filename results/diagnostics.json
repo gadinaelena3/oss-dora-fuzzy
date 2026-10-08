@@ -1,0 +1,205 @@
+{
+  "exact_permutation_p": {
+    "django": 0.8629,
+    "kubernetes": 0.43332,
+    "numpy": 0.60226,
+    "react": 0.04994,
+    "rust": 0.08778,
+    "vscode": 4e-05
+  },
+  "smallest_detectable_abs_delta": {
+    "alpha_bonferroni": 0.75,
+    "alpha_0.05": 0.583
+  },
+  "holm_era_contrasts": {
+    "django": 1.0,
+    "kubernetes": 1.0,
+    "numpy": 1.0,
+    "react": 0.268,
+    "rust": 0.3628,
+    "vscode": 0.0012
+  },
+  "lag1_autocorrelation": {
+    "phs": {
+      "django": -0.22,
+      "kubernetes": 0.16,
+      "numpy": 0.26,
+      "react": 0.34,
+      "rust": 0.07,
+      "vscode": 0.69
+    },
+    "n_prs": {
+      "django": 0.48,
+      "kubernetes": 0.84,
+      "numpy": -0.04,
+      "react": 0.57,
+      "rust": 0.88,
+      "vscode": 0.95
+    },
+    "dspd": {
+      "django": 0.48,
+      "kubernetes": 0.84,
+      "numpy": -0.04,
+      "react": 0.57,
+      "rust": 0.88,
+      "vscode": 0.93
+    },
+    "ltbf": {
+      "django": 0.77,
+      "kubernetes": 0.45,
+      "numpy": 0.12,
+      "react": 0.43,
+      "rust": 0.38,
+      "vscode": 0.93
+    },
+    "qd": {
+      "django": -0.1,
+      "kubernetes": 0.04,
+      "numpy": 0.03,
+      "react": -0.08,
+      "rust": -0.01,
+      "vscode": 0.27
+    }
+  },
+  "pairwise_holm": {
+    "separated": 10,
+    "pairs": 15,
+    "not_separated": [
+      "django-numpy",
+      "django-react",
+      "kubernetes-rust",
+      "numpy-react",
+      "numpy-vscode"
+    ]
+  },
+  "without_fallback": {
+    "n": 102,
+    "kruskal_H": 54.81,
+    "kruskal_p": 1.426521791238968e-10,
+    "era_tests": {
+      "django": {
+        "n_pre": 5,
+        "n_ai": 6,
+        "delta": -0.033,
+        "p": 1.0
+      },
+      "kubernetes": {
+        "n_pre": 3,
+        "n_ai": 4,
+        "delta": -0.833,
+        "p": 0.1143
+      },
+      "numpy": {
+        "n_pre": 8,
+        "n_ai": 8,
+        "delta": -0.062,
+        "p": 0.8564
+      },
+      "react": {
+        "n_pre": 7,
+        "n_ai": 6,
+        "delta": -0.548,
+        "p": 0.0984
+      },
+      "rust": {
+        "n_pre": 1,
+        "n_ai": 9
+      },
+      "vscode": {
+        "n_pre": 8,
+        "n_ai": 9,
+        "delta": 1.0,
+        "p": 0.0002
+      }
+    }
+  },
+  "output_granularity": {
+    "rules_fired_per_quarter": {
+      "0": 42,
+      "1": 76,
+      "2": 19,
+      "3": 5,
+      "4": 2
+    },
+    "most_frequent_scores": {
+      "50.00": 42,
+      "60.00": 41,
+      "72.50": 17,
+      "35.00": 14
+    },
+    "quarters_at_four_most_frequent_scores": 114,
+    "edge_example": {
+      "dspd_14.00_ltbf_20_qd_3": 50.0,
+      "dspd_14.05_ltbf_20_qd_3": 35.0
+    }
+  },
+  "qd_proxy": {
+    "spearman_ftmr_vs_median_cycle": -0.94,
+    "spearman_qd_vs_deletion_addition_ratio": -0.92,
+    "quarters_one_pr_over_half_of_deletions": 9,
+    "largest_single_pr_share": {
+      "project_quarter": "django/2022Q1",
+      "share_pct": 96.1
+    }
+  },
+  "crisp_lookup": {
+    "same_outcome": 128,
+    "uncovered_crisp": 57,
+    "uncovered_fuzzy": 42,
+    "n": 144
+  },
+  "ai_era_start": {
+    "2022Q3": {
+      "p": {
+        "django": 0.8912,
+        "kubernetes": 0.2833,
+        "numpy": 0.407,
+        "react": 0.0324,
+        "rust": 0.1298,
+        "vscode": 0.0001
+      },
+      "below_alpha": [
+        "vscode"
+      ]
+    },
+    "2022Q4": {
+      "p": {
+        "django": 0.8817,
+        "kubernetes": 0.4508,
+        "numpy": 0.6278,
+        "react": 0.0536,
+        "rust": 0.0907,
+        "vscode": 0.0002
+      },
+      "below_alpha": [
+        "vscode"
+      ]
+    },
+    "2023Q1": {
+      "p": {
+        "django": 0.9565,
+        "kubernetes": 0.3253,
+        "numpy": 0.8564,
+        "react": 0.0835,
+        "rust": 0.1509,
+        "vscode": 0.0003
+      },
+      "below_alpha": [
+        "vscode"
+      ]
+    },
+    "2023Q2": {
+      "p": {
+        "django": 0.9517,
+        "kubernetes": 0.4727,
+        "numpy": 0.948,
+        "react": 0.0863,
+        "rust": 0.2551,
+        "vscode": 0.0004
+      },
+      "below_alpha": [
+        "vscode"
+      ]
+    }
+  }
+}

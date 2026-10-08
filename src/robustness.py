@@ -142,15 +142,15 @@ def main():
     (OUT / "leave_one_project_out_summary.json").write_text(json.dumps(summary(held), default=float, indent=2))
 
     prev = run_dss(cm.proxies(sb, sb.groupby("project_id").n_prs.mean(), k_dspd=14, k_ltbf=8, k_qd=3))
-    pd.DataFrame([{"variant": "complete data, previous calibration (14, 8, 3; whole-window mean; bots included)", **flat({"k_dspd": 14, "k_ltbf": 8, "k_qd": 3}, prev)},
-                  {"variant": "complete data, anchored calibration", **flat(k0, ref)}]).to_csv(OUT / "previous_calibration.csv", index=False)
+    pd.DataFrame([{"variant": "complete data, entropy-based calibration (14, 8, 3; whole-window mean; bots included)", **flat({"k_dspd": 14, "k_ltbf": 8, "k_qd": 3}, prev)},
+                  {"variant": "complete data, anchored calibration", **flat(k0, ref)}]).to_csv(OUT / "entropy_calibration.csv", index=False)
     ref.to_csv(OUT / "reference.csv", index=False)
-    gone = pd.read_csv(ROOT / "data" / "previous" / "not_returned.csv")
+    gone = pd.read_csv(ROOT / "data" / "initial" / "not_returned.csv")
     gone["created"] = pd.to_datetime(gone.created_at).dt.tz_localize(None)
     gone["merged"] = pd.to_datetime(gone.merged_at).dt.tz_localize(None)
     gone["days"] = (gone.merged - gone.created).dt.total_seconds() / 86400
     gone["quarter"] = gone.merged.dt.to_period("Q").astype(str)
-    gone = gone.assign(bot=False, from_fork=False, self_merged=False, no_review=False)
+    gone = gone.assign(bot=False, default_base=True, from_fork=False, self_merged=False, no_review=False)
     sr = cm.signals(pd.concat([prs, gone[prs.columns]], ignore_index=True))
     kr, baser = cm.calibrate(sr)
     refr = run_dss(cm.proxies(sr, baser, **kr))
@@ -162,13 +162,48 @@ def main():
     gone.assign(era=gone.quarter.map(era)).groupby(["project_id", "era"]).size().unstack(fill_value=0).to_csv(OUT / "not_returned_by_era.csv")
     refb.to_csv(OUT / "reference_bots_included.csv", index=False)
 
+    rows = []
+    years = {"2019": [f"2019Q{i}" for i in range(1, 5)], "2020": [f"2020Q{i}" for i in range(1, 5)]}
+    for cal, test in [("2019", "2020"), ("2020", "2019")]:
+        k, b = cm.calibrate(s, years[cal])
+        d = run_dss(cm.proxies(s, b, **k))
+        row = {"calibrated_on": cal, "pre_ai_test_quarters": test, **k, **{a: v for a, v in summary(d).items() if a != "states"},
+               "quarters_state_changed": int((d.state.values != ref.state.values).sum())}
+        for p, x in d.groupby("project_id"):
+            pre, ai = x[x.quarter.isin(years[test])].phs.values, x[x.era == "ai"].phs.values
+            u, pv = stats.mannwhitneyu(ai, pre, alternative="two-sided")
+            row[f"{p}_delta"], row[f"{p}_p"] = round(2 * u / (len(pre) * len(ai)) - 1, 3), round(pv, 4)
+        rows.append(row)
+    pd.DataFrame(rows).to_csv(OUT / "temporal_holdout.csv", index=False)
+
+    main = prs[prs.default_base]
+    sm = cm.signals(main)
+    km, basem = cm.calibrate(sm)
+    refm = run_dss(cm.proxies(sm, basem, **km))
+    both = ref.merge(refm, on=["project_id", "quarter"], suffixes=("", "_main"))
+    human = prs[~prs.bot]
+    share = human.assign(era=human.quarter.map(era)).groupby(["project_id", "era"]).default_base.agg(lambda x: round(100 * (1 - x.mean()), 1)).unstack()
+    share["all"] = human.groupby("project_id").default_base.agg(lambda x: round(100 * (1 - x.mean()), 1))
+    share["n_other_base"] = human.groupby("project_id").default_base.agg(lambda x: int((~x).sum()))
+    share.to_csv(OUT / "other_base_share.csv")
+    pre_q = cm.pre_ai_quarters()
+    pd.DataFrame([{"variant": "all merged pull requests (reported)", "n_prs": int(s.n_prs.sum()), **flat(k0, ref),
+                   "pooled_pre_ai_median_days": round(float(s[s.quarter.isin(pre_q)].median_cycle_days.median()), 3)},
+                  {"variant": "default branch only", "n_prs": int(sm.n_prs.sum()), **flat(km, refm),
+                   "pooled_pre_ai_median_days": round(float(sm[sm.quarter.isin(pre_q)].median_cycle_days.median()), 3),
+                   "quarters_state_changed": int((both.state != both.state_main).sum())}]).to_csv(OUT / "default_branch_only.csv", index=False)
+    refm.to_csv(OUT / "reference_default_branch_only.csv", index=False)
+
     print(json.dumps(k0), json.dumps(summary(ref), default=float))
+    print(pd.read_csv(OUT / "temporal_holdout.csv").T.to_string())
+    print(pd.read_csv(OUT / "default_branch_only.csv").T.to_string())
+    print(pd.read_csv(OUT / "other_base_share.csv").to_string(index=False))
     print(pd.DataFrame(era_tests(ref)).T.to_string())
     print(pd.DataFrame(gs).to_string(index=False))
     print("H range", grid.kruskal_H.min(), grid.kruskal_H.max(), "fallback range", grid.fallback_pct.min(), grid.fallback_pct.max())
     print(pd.read_csv(OUT / "leave_one_project_out.csv").to_string(index=False))
     print(pd.read_csv(OUT / "bots.csv").T.to_string())
-    print(pd.read_csv(OUT / "previous_calibration.csv").T.to_string())
+    print(pd.read_csv(OUT / "entropy_calibration.csv").T.to_string())
     print(pd.read_csv(OUT / "inputs_kruskal.csv").to_string(index=False))
     print(pd.read_csv(OUT / "restored.csv").T.to_string())
     print(pd.read_csv(OUT / "not_returned_by_era.csv").to_string(index=False))

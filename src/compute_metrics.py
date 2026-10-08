@@ -14,6 +14,7 @@ ANCHORS = {"dspd": 12.0, "ltbf": 7.0, "qd": 3.0}
 BOT_LOGINS = {"rustbot"}
 BOT_SUFFIXES = ("-bot", "-robot", "[bot]")
 CHURN_FLOOR = 0.05
+DEFAULT_BRANCHES = ("main", "master")
 
 
 def is_bot(pr):
@@ -35,6 +36,7 @@ def load_prs():
                 "additions": o["additions"],
                 "deletions": o["deletions"],
                 "bot": is_bot(o),
+                "default_base": o.get("base") in DEFAULT_BRANCHES,
                 "from_fork": bool(o.get("from_fork")),
                 "self_merged": o.get("author") is not None and o.get("author") == o.get("merged_by"),
                 "no_review": o.get("reviews", 0) == 0,
@@ -70,8 +72,8 @@ def pre_ai_quarters():
     return set(cfg["eras"]["pre_ai"]["quarters"])
 
 
-def calibrate(s):
-    pre = s[s.quarter.isin(pre_ai_quarters())]
+def calibrate(s, quarters=None):
+    pre = s[s.quarter.isin(quarters or pre_ai_quarters())]
     base = pre.groupby("project_id").n_prs.mean()
     volume = pre.n_prs / pre.project_id.map(base)
     quality = pre.first_time_merge_rate / pre.churn_ratio.clip(lower=CHURN_FLOOR)
